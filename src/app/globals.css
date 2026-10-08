@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+:root {
+  /* Hamdouni's Chicken — charcoal, flame gold and ember red, from the logo */
+  --hc-bg: #0e0907;
+  --hc-surface: #1a110c;
+  --hc-ink: #f8ecd8;
+  --hc-accent: #f4b223;
+  --hc-accent-dark: #c9850c;
+  --hc-accent-soft: #ffd166;
+  --hc-red: #d42a1e;
+  --hc-red-dark: #a11b12;
+  --hc-line: #3d2a1c;
+  --hc-muted: #b9a088;
+}
+
+@theme inline {
+  --font-display: var(--font-display);
+  --font-body-fr: var(--font-body-fr);
+  --font-body-ar: var(--font-body-ar);
+}
+
+html,
+body {
+  background-color: var(--hc-bg);
+  background-image:
+    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(212, 42, 30, 0.22), transparent 70%),
+    radial-gradient(ellipse 60% 30% at 50% 0%, rgba(244, 178, 35, 0.12), transparent 70%),
+    url("/brand/motif-tile.svg");
+  background-repeat: no-repeat, no-repeat, repeat;
+  background-size: auto, auto, 320px 320px;
+}
+
+body {
+  font-family: var(--font-body-fr), system-ui, sans-serif;
+}
+
+html[dir="rtl"] body {
+  font-family: var(--font-body-ar), system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), system-ui, sans-serif;
+}
+
+html[dir="rtl"] .font-display {
+  font-family: var(--font-body-ar), system-ui, sans-serif;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--hc-accent);
+}
+
+.hairline {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--hc-red) 15%,
+    var(--hc-accent) 50%,
+    var(--hc-red) 85%,
+    transparent
+  );
+  opacity: 0.8;
+}
+
+.font-display {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+html[dir="rtl"] .font-display {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 700;
+}
+
+/* Primary call-to-action: ember red with a warm glow */
+.btn-flame {
+  background: linear-gradient(180deg, var(--hc-red), var(--hc-red-dark));
+  border-color: var(--hc-red);
+  color: #fff7ea;
+  box-shadow: 0 8px 24px -10px rgba(212, 42, 30, 0.7);
+}
+
+.btn-flame:hover {
+  background: linear-gradient(180deg, #e8392c, var(--hc-red));
+  border-color: var(--hc-accent);
+}

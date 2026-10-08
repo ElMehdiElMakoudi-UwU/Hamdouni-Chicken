@@ -1,0 +1,374 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id            String              @id @default(cuid())
+  email         String              @unique
+  passwordHash  String
+  role          String              @default("ADMIN") // "ADMIN" | "CASHIER" | "WORKER"
+  workstationId String?
+  workstation   Workstation?        @relation(fields: [workstationId], references: [id], onDelete: SetNull)
+  createdAt     DateTime            @default(now())
+  transactions  PointsTransaction[]
+  restocks      StockRestock[]
+  dailySales    DailySales[]
+  stockCounts   StockCount[]
+  recoveryCases Feedback[]
+}
+
+model MenuSection {
+  id         String         @id @default(cuid())
+  nameAr     String
+  nameFr     String
+  sortOrder  Int            @default(0)
+  categories MenuCategory[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+model MenuCategory {
+  id        String      @id @default(cuid())
+  sectionId String
+  section   MenuSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  nameAr    String
+  nameFr    String
+  sortOrder Int         @default(0)
+  items     MenuItem[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model MenuItem {
+  id              String            @id @default(cuid())
+  categoryId      String
+  category        MenuCategory      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  nameAr          String
+  nameFr          String
+  descriptionAr   String?
+  descriptionFr   String?
+  noteAr          String?
+  noteFr          String?
+  price           Float?
+  priceLarge      Float?
+  comingSoon      Boolean           @default(false)
+  photoUrl        String?
+  available       Boolean           @default(true)
+  sortOrder       Int               @default(0)
+  workstationId   String?
+  workstation     Workstation?      @relation(fields: [workstationId], references: [id], onDelete: SetNull)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  orderItems      OrderItem[]
+  itemRatings     ItemRating[]
+  recipeItems     RecipeItem[]
+  dailySalesItems DailySalesItem[]
+  optionGroups    MenuOptionGroup[]
+}
+
+// A choice attached to a menu item, e.g. "Sauce" (pick 1) or "Suppléments" (pick any).
+model MenuOptionGroup {
+  id         String       @id @default(cuid())
+  menuItemId String
+  menuItem   MenuItem     @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  nameAr     String
+  nameFr     String
+  required   Boolean      @default(false)
+  maxSelect  Int          @default(1) // 1 = single choice, 0 = no limit
+  sortOrder  Int          @default(0)
+  options    MenuOption[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([menuItemId])
+}
+
+model MenuOption {
+  id         String          @id @default(cuid())
+  groupId    String
+  group      MenuOptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  nameAr     String
+  nameFr     String
+  priceDelta Float           @default(0)
+  available  Boolean         @default(true)
+  sortOrder  Int             @default(0)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([groupId])
+}
+
+model Feedback {
+  id            String       @id @default(cuid())
+  tableNumber   String
+  foodRating    Int
+  serviceRating Int
+  comment       String?
+  enteredDraw   Boolean      @default(false)
+  phone         String?
+  weekKey       String?
+  createdAt     DateTime     @default(now())
+  drawWinner    DrawWinner?
+  itemRatings   ItemRating[]
+
+  // Low-rating recovery (any rating ≤2). Null recoveryStatus = not a case.
+  recoveryStatus   String? // "OPEN" | "CONTACTED" | "RESOLVED" | "NO_ACTION"
+  managerRequested Boolean       @default(false)
+  contactConsent   Boolean       @default(false) // guest agreed to be contacted about this visit
+  rootCause        String?
+  recoveryNote     String?
+  handledById      String?
+  handledBy        AdminUser?    @relation(fields: [handledById], references: [id], onDelete: SetNull)
+  handledAt        DateTime?
+  tableRequest     TableRequest?
+
+  @@index([recoveryStatus])
+}
+
+model ItemRating {
+  id         String   @id @default(cuid())
+  feedbackId String
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  rating     Int
+  createdAt  DateTime @default(now())
+
+  @@unique([feedbackId, menuItemId])
+}
+
+model DrawWinner {
+  id         String   @id @default(cuid())
+  weekKey    String   @unique
+  feedbackId String   @unique
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  pickedAt   DateTime @default(now())
+}
+
+model Customer {
+  id           String              @id @default(cuid())
+  phone        String              @unique
+  points       Int                 @default(0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  transactions PointsTransaction[]
+  orders       Order[]
+}
+
+model PointsTransaction {
+  id          String     @id @default(cuid())
+  customerId  String
+  customer    Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  points      Int // positive = earned from an order, negative = redeemed
+  orderTotal  Float? // set when points were earned from an order
+  note        String? // e.g. what was redeemed
+  orderId     String?
+  order       Order?     @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdById String?
+  createdBy   AdminUser? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+}
+
+model LoyaltyOffer {
+  id         String   @id @default(cuid())
+  titleAr    String
+  titleFr    String
+  pointsCost Int
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Order {
+  id                 String              @id @default(cuid())
+  tableNumber        String
+  guestName          String?
+  deliveryAddress    String?
+  status             String              @default("SENT") // "SENT" | "CONFIRMED" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED"
+  note               String?
+  total              Float
+  customerId         String?
+  customer           Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items              OrderItem[]
+  pointsTransactions PointsTransaction[]
+  pushSubscriptions  PushSubscription[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+model OrderItem {
+  id         String    @id @default(cuid())
+  orderId    String
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId String?
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  nameAr     String
+  nameFr     String
+  size       String? // "REGULAR" | "LARGE"
+  optionsAr  String? // snapshot of chosen options, e.g. "Harissa، جبن"
+  optionsFr  String?
+  unitPrice  Float
+  quantity   Int       @default(1)
+  confirmed  Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+}
+
+model Kitchen {
+  id           String        @id @default(cuid())
+  name         String
+  sortOrder    Int           @default(0)
+  workstations Workstation[]
+  createdAt    DateTime      @default(now())
+}
+
+model Workstation {
+  id          String                  @id @default(cuid())
+  kitchenId   String
+  kitchen     Kitchen                 @relation(fields: [kitchenId], references: [id], onDelete: Cascade)
+  name        String
+  sortOrder   Int                     @default(0)
+  ingredients WorkstationIngredient[]
+  workers     AdminUser[]
+  menuItems   MenuItem[]
+  stockCounts StockCount[]
+  createdAt   DateTime                @default(now())
+}
+
+model Ingredient {
+  id          String                  @id @default(cuid())
+  name        String
+  unit        String // e.g. "Kg", "Packet x18", "Unit"
+  active      Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  stations    WorkstationIngredient[]
+  recipeItems RecipeItem[]
+}
+
+// The manager-defined counter form: which ingredients a workstation stocks,
+// plus the live running quantity carried forward day to day.
+model WorkstationIngredient {
+  id              String            @id @default(cuid())
+  workstationId   String
+  workstation     Workstation       @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  ingredientId    String
+  ingredient      Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  currentQuantity Float             @default(0)
+  sortOrder       Int               @default(0)
+  restocks        StockRestock[]
+  countEntries    StockCountEntry[]
+
+  @@unique([workstationId, ingredientId])
+}
+
+// Mid-shift resupply logged during the day; applied immediately to currentQuantity.
+model StockRestock {
+  id                      String                @id @default(cuid())
+  workstationIngredientId String
+  workstationIngredient   WorkstationIngredient @relation(fields: [workstationIngredientId], references: [id], onDelete: Cascade)
+  quantity                Float
+  note                    String?
+  photoUrl                String? // proof-of-scale photo, saved under /uploads
+  createdById             String
+  createdBy               AdminUser             @relation(fields: [createdById], references: [id])
+  createdAt               DateTime              @default(now())
+}
+
+// Fiche technique: ingredients consumed per unit sold of a menu item.
+model RecipeItem {
+  id           String     @id @default(cuid())
+  menuItemId   String
+  menuItem     MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  size         String? // null | "REGULAR" | "LARGE" — mirrors OrderItem.size
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  quantity     Float // amount consumed per one unit sold
+
+  @@unique([menuItemId, size, ingredientId])
+}
+
+// Manager's end-of-day entry of how many of each item sold.
+model DailySales {
+  id          String           @id @default(cuid())
+  date        DateTime         @unique // normalized to midnight
+  createdById String
+  createdBy   AdminUser        @relation(fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  items       DailySalesItem[]
+}
+
+model DailySalesItem {
+  id           String     @id @default(cuid())
+  dailySalesId String
+  dailySales   DailySales @relation(fields: [dailySalesId], references: [id], onDelete: Cascade)
+  menuItemId   String
+  menuItem     MenuItem   @relation(fields: [menuItemId], references: [id])
+  size         String?
+  quantitySold Int
+
+  @@unique([dailySalesId, menuItemId, size])
+}
+
+// Worker's physical count submission for one workstation, taken either at
+// the start of the shift ("OPENING") or the end of it ("CLOSING").
+model StockCount {
+  id            String            @id @default(cuid())
+  workstationId String
+  workstation   Workstation       @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  date          DateTime // normalized to midnight
+  period        String            @default("CLOSING") // "OPENING" | "CLOSING"
+  workerId      String
+  worker        AdminUser         @relation(fields: [workerId], references: [id])
+  finalizedAt   DateTime?
+  createdAt     DateTime          @default(now())
+  entries       StockCountEntry[]
+
+  @@unique([workstationId, date, period])
+}
+
+model StockCountEntry {
+  id                      String                @id @default(cuid())
+  stockCountId            String
+  stockCount              StockCount            @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  workstationIngredientId String
+  workstationIngredient   WorkstationIngredient @relation(fields: [workstationIngredientId], references: [id])
+  actualQuantity          Float
+  expectedQuantity        Float?
+  variance                Float?
+  photoUrl                String? // proof-of-scale photo, saved under /uploads
+
+  @@unique([stockCountId, workstationIngredientId])
+}
+
+// Customer "call a waiter" / "bring the bill" requests sent from the table.
+model TableRequest {
+  id            String    @id @default(cuid())
+  tableNumber   String
+  type          String // "WAITER" | "BILL" | "MANAGER"
+  paymentMethod String? // "CASH" | "CARD" — only for BILL requests
+  status        String    @default("PENDING") // "PENDING" | "DONE"
+  createdAt     DateTime  @default(now())
+  resolvedAt    DateTime?
+  feedbackId    String?   @unique // set for MANAGER requests raised by a low rating
+  feedback      Feedback? @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  @@index([status, tableNumber])
+}
