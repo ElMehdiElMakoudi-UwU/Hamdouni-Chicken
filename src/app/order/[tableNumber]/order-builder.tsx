@@ -8,181 +8,20 @@ import { LanguageToggle } from "@/components/language-toggle";
 import { placeOrder, addItemsToOrder } from "@/app/actions/orders";
 import { isTakeawayTable, isDeliveryTable } from "@/lib/order-mode";
 import type { MenuSectionView, MenuItemView } from "@/app/menu/types";
-import { resolveOptions, formatPriceDelta } from "@/lib/menu-options";
+import { OptionPicker } from "@/components/option-picker";
+import {
+  addLine,
+  cartKey,
+  changeQuantity,
+  clearCartDraft,
+  loadCartDraft,
+  reconcileCart,
+  saveCartDraft,
+  type Cart,
+  type Size,
+} from "@/lib/cart-draft";
 
-type Size = "REGULAR" | "LARGE";
-
-type CartLine = {
-  menuItemId: string;
-  nameAr: string;
-  nameFr: string;
-  size: Size | null;
-  optionIds: string[];
-  optionsAr: string | null;
-  optionsFr: string | null;
-  unitPrice: number;
-  quantity: number;
-};
-
-type PendingAdd = { item: MenuItemView; size: Size | null; basePrice: number };
-
-function cartKey(menuItemId: string, size: Size | null, optionIds: string[]) {
-  return `${menuItemId}:${size ?? "REGULAR"}:${[...optionIds].sort().join(",")}`;
-}
-
-function OptionPicker({
-  pendingAdd,
-  lang,
-  onCancel,
-  onConfirm,
-}: {
-  pendingAdd: PendingAdd;
-  lang: "ar" | "fr";
-  onCancel: () => void;
-  onConfirm: (optionIds: string[]) => void;
-}) {
-  const { item, size, basePrice } = pendingAdd;
-  const groups = item.optionGroups;
-  const [selected, setSelected] = useState<string[]>(() =>
-    // Pre-select the first choice of required single-choice groups.
-    groups
-      .filter((g) => g.required && g.maxSelect === 1)
-      .map((g) => g.options[0].id)
-  );
-  const [showErrors, setShowErrors] = useState(false);
-
-  const resolved = resolveOptions(groups, selected);
-  const unitPrice = basePrice + (resolved.ok ? resolved.priceDelta : 0);
-
-  function toggle(groupId: string, optionId: string) {
-    const group = groups.find((g) => g.id === groupId)!;
-    const groupOptionIds = new Set(group.options.map((o) => o.id));
-    setSelected((prev) => {
-      if (group.maxSelect === 1) {
-        const others = prev.filter((id) => !groupOptionIds.has(id));
-        return prev.includes(optionId) && !group.required
-          ? others
-          : [...others, optionId];
-      }
-      if (prev.includes(optionId)) return prev.filter((id) => id !== optionId);
-      const inGroup = prev.filter((id) => groupOptionIds.has(id)).length;
-      if (group.maxSelect > 0 && inGroup >= group.maxSelect) return prev;
-      return [...prev, optionId];
-    });
-  }
-
-  function confirm() {
-    if (!resolved.ok) {
-      setShowErrors(true);
-      return;
-    }
-    onConfirm(resolved.optionIds);
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-30 flex items-end justify-center bg-black/40 sm:items-center"
-      onClick={onCancel}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-md flex-col rounded-t-xl bg-[var(--hc-bg)] sm:rounded-xl"
-      >
-        <div className="border-b border-[var(--hc-line)] px-5 py-4">
-          <h3 className="font-display text-lg text-[var(--hc-ink)]">
-            {pick(lang, item.nameAr, item.nameFr)}
-            {size === "LARGE" && (
-              <span className="ml-1 text-sm text-[var(--hc-muted)]">(L)</span>
-            )}
-          </h3>
-        </div>
-
-        <div className="flex flex-col gap-5 overflow-y-auto px-5 py-4">
-          {groups.map((group) => {
-            const count = group.options.filter((o) => selected.includes(o.id)).length;
-            const invalid =
-              showErrors && !resolved.ok && resolved.groupId === group.id;
-            return (
-              <fieldset key={group.id}>
-                <legend className="mb-2 flex w-full items-baseline justify-between gap-2">
-                  <span className="text-sm font-medium text-[var(--hc-ink)]">
-                    {pick(lang, group.nameAr, group.nameFr)}
-                  </span>
-                  <span
-                    className={`text-xs ${invalid ? "text-red-700" : "text-[var(--hc-muted)]"}`}
-                  >
-                    {group.required
-                      ? pick(lang, "إجباري", "Obligatoire")
-                      : pick(lang, "اختياري", "Optionnel")}
-                    {group.maxSelect > 1 &&
-                      ` · ${count}/${group.maxSelect}`}
-                  </span>
-                </legend>
-                <div className="flex flex-col gap-1.5">
-                  {group.options.map((option) => {
-                    const checked = selected.includes(option.id);
-                    return (
-                      <label
-                        key={option.id}
-                        className={`flex cursor-pointer items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-sm transition ${
-                          checked
-                            ? "border-[var(--hc-accent)] bg-[var(--hc-surface)]"
-                            : "border-[var(--hc-line)]"
-                        }`}
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <input
-                            type={group.maxSelect === 1 ? "radio" : "checkbox"}
-                            name={group.id}
-                            checked={checked}
-                            onChange={() => toggle(group.id, option.id)}
-                            onClick={() => {
-                              // Radios don't fire onChange when re-clicked; allow
-                              // un-selecting an optional single choice.
-                              if (group.maxSelect === 1 && checked && !group.required) {
-                                toggle(group.id, option.id);
-                              }
-                            }}
-                            className="accent-[var(--hc-accent)]"
-                          />
-                          {pick(lang, option.nameAr, option.nameFr)}
-                        </span>
-                        {option.priceDelta !== 0 && (
-                          <span className="whitespace-nowrap text-xs text-[var(--hc-muted)]">
-                            {formatPriceDelta(option.priceDelta)} {pick(lang, "درهم", "DH")}
-                          </span>
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              </fieldset>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center gap-3 border-t border-[var(--hc-line)] px-5 py-4">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md border border-[var(--hc-line)] px-4 py-3 text-sm text-[var(--hc-muted)]"
-          >
-            {pick(lang, "إلغاء", "Annuler")}
-          </button>
-          <button
-            type="button"
-            onClick={confirm}
-            className="btn-flame font-display border flex-1 rounded-md px-4 py-3 text-sm tracking-wide transition"
-          >
-            {pick(lang, "إضافة", "Ajouter")} · {unitPrice} {pick(lang, "درهم", "DH")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+type PendingAdd = { item: MenuItemView; size: Size | null };
 
 function ItemRow({
   item,
@@ -191,7 +30,7 @@ function ItemRow({
 }: {
   item: MenuItemView;
   lang: "ar" | "fr";
-  onAdd: (size: Size | null, unitPrice: number) => void;
+  onAdd: (size: Size | null) => void;
 }) {
   if (item.comingSoon) return null;
 
@@ -240,7 +79,7 @@ function ItemRow({
             <div className="flex flex-col gap-1.5">
               <button
                 type="button"
-                onClick={() => onAdd("REGULAR", item.price as number)}
+                onClick={() => onAdd("REGULAR")}
                 className="rounded-md border border-[var(--hc-line)] px-2 py-1.5 text-xs transition hover:border-[var(--hc-accent)] hover:text-[var(--hc-accent)]"
               >
                 {pick(lang, "إضافة (صغير)", "Ajouter (M)")} · {item.price}{" "}
@@ -248,7 +87,7 @@ function ItemRow({
               </button>
               <button
                 type="button"
-                onClick={() => onAdd("LARGE", item.priceLarge as number)}
+                onClick={() => onAdd("LARGE")}
                 className="rounded-md border border-[var(--hc-line)] px-2 py-1.5 text-xs transition hover:border-[var(--hc-accent)] hover:text-[var(--hc-accent)]"
               >
                 {pick(lang, "إضافة (كبير)", "Ajouter (L)")} · {item.priceLarge}{" "}
@@ -258,7 +97,7 @@ function ItemRow({
           ) : (
             <button
               type="button"
-              onClick={() => onAdd(null, item.price as number)}
+              onClick={() => onAdd(null)}
               className="w-full rounded-md border border-[var(--hc-line)] px-2 py-1.5 text-xs transition hover:border-[var(--hc-accent)] hover:text-[var(--hc-accent)]"
             >
               {pick(lang, "إضافة", "Ajouter")}
@@ -286,7 +125,8 @@ export function OrderBuilder({
   const { lang } = useLanguage();
   const isTakeaway = isTakeawayTable(tableNumber);
   const isDelivery = isDeliveryTable(tableNumber);
-  const [cart, setCart] = useState<Record<string, CartLine>>({});
+  const [cart, setCart] = useState<Cart>({});
+  const [draftLoaded, setDraftLoaded] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -296,6 +136,23 @@ export function OrderBuilder({
   const [pendingAdd, setPendingAdd] = useState<PendingAdd | null>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const dragStartY = useRef<number | null>(null);
+
+  // Pick up whatever the guest added on /menu before choosing how to order.
+  // Adding to an existing order keeps its own cart, separate from the draft.
+  useEffect(() => {
+    if (addToOrderId) return;
+    const draft = reconcileCart(loadCartDraft(), sections);
+    if (Object.keys(draft).length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage is only readable after mount
+      setCart(draft);
+      setCartOpen(true);
+    }
+    setDraftLoaded(true);
+  }, [addToOrderId, sections]);
+
+  useEffect(() => {
+    if (draftLoaded) saveCartDraft(cart);
+  }, [cart, draftLoaded]);
 
   // Roll the cart down as soon as the guest scrolls the menu, so it never
   // hides the dishes they're browsing. Skip while typing in the cart: the
@@ -374,57 +231,21 @@ export function OrderBuilder({
       .filter((section) => section.categories.length > 0);
   }, [sections, normalizedQuery, activeCategoryId]);
 
-  function requestAdd(item: MenuItemView, size: Size | null, basePrice: number) {
+  function requestAdd(item: MenuItemView, size: Size | null) {
     if (item.optionGroups.length > 0) {
-      setPendingAdd({ item, size, basePrice });
+      setPendingAdd({ item, size });
     } else {
-      addToCart(item, size, basePrice, []);
+      addToCart(item, size, []);
     }
   }
 
-  function addToCart(
-    item: MenuItemView,
-    size: Size | null,
-    basePrice: number,
-    optionIds: string[]
-  ) {
-    const resolved = resolveOptions(item.optionGroups, optionIds);
-    if (!resolved.ok) return;
-    const key = cartKey(item.id, size, resolved.optionIds);
-    setCart((prev) => {
-      const existing = prev[key];
-      return {
-        ...prev,
-        [key]: existing
-          ? { ...existing, quantity: existing.quantity + 1 }
-          : {
-              menuItemId: item.id,
-              nameAr: item.nameAr,
-              nameFr: item.nameFr,
-              size,
-              optionIds: resolved.optionIds,
-              optionsAr: resolved.labelAr,
-              optionsFr: resolved.labelFr,
-              unitPrice: basePrice + resolved.priceDelta,
-              quantity: 1,
-            },
-      };
-    });
+  function addToCart(item: MenuItemView, size: Size | null, optionIds: string[]) {
+    setCart((prev) => addLine(prev, item, size, optionIds));
     setCartOpen(true);
   }
 
   function updateQuantity(key: string, delta: number) {
-    setCart((prev) => {
-      const existing = prev[key];
-      if (!existing) return prev;
-      const quantity = existing.quantity + delta;
-      if (quantity <= 0) {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      }
-      return { ...prev, [key]: { ...existing, quantity } };
-    });
+    setCart((prev) => changeQuantity(prev, key, delta));
   }
 
   function submitOrder() {
@@ -436,6 +257,9 @@ export function OrderBuilder({
         optionIds: line.optionIds,
         quantity: line.quantity,
       }));
+      // placeOrder redirects on success, so drop the draft up front and
+      // put it back only if the order was rejected.
+      if (!addToOrderId) clearCartDraft();
       const result = addToOrderId
         ? await addItemsToOrder({
             orderId: addToOrderId,
@@ -450,6 +274,7 @@ export function OrderBuilder({
             items: cartItems,
           });
       if (result?.status === "error") {
+        if (!addToOrderId) saveCartDraft(cart);
         setError(result.message);
       }
     });
@@ -557,7 +382,7 @@ export function OrderBuilder({
                         key={item.id}
                         item={item}
                         lang={lang}
-                        onAdd={(size, unitPrice) => requestAdd(item, size, unitPrice)}
+                        onAdd={(size) => requestAdd(item, size)}
                       />
                     ))}
                   </div>
@@ -729,11 +554,12 @@ export function OrderBuilder({
       {pendingAdd && (
         <OptionPicker
           key={`${pendingAdd.item.id}:${pendingAdd.size}`}
-          pendingAdd={pendingAdd}
+          item={pendingAdd.item}
+          size={pendingAdd.size}
           lang={lang}
           onCancel={() => setPendingAdd(null)}
-          onConfirm={(optionIds) => {
-            addToCart(pendingAdd.item, pendingAdd.size, pendingAdd.basePrice, optionIds);
+          onConfirm={(size, optionIds) => {
+            addToCart(pendingAdd.item, size, optionIds);
             setPendingAdd(null);
           }}
         />

@@ -29,8 +29,8 @@ Set these in the Coolify application's **Environment Variables** tab (mark secre
 | --- | --- | --- |
 | `DATABASE_URL` | `file:/app/data/prod.db` | Must live under the mounted volume path |
 | `SESSION_SECRET` | (long random string) | Generate with `openssl rand -hex 32`. Used to sign the admin session cookie |
-| `ADMIN_EMAIL` | `owner@yourdomain.com` | Used by `prisma/seed.ts` if you run the seed manually |
-| `ADMIN_PASSWORD` | (strong password) | Same as above |
+| `ADMIN_EMAIL` | `owner@yourdomain.com` | **Required.** The entrypoint creates/updates this admin login on every start |
+| `ADMIN_PASSWORD` | (strong password) | **Required.** Same as above (re-applied on every start) |
 | `NODE_ENV` | `production` | Already set in the image, but fine to set explicitly |
 
 Do **not** commit real secrets — `.env` is gitignored; use `.env.example` as the template.

@@ -1,11 +1,23 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useLanguage, pick, type Lang } from "@/lib/language-context";
 import { LanguageToggle } from "@/components/language-toggle";
 import type { MenuSectionView, MenuItemView } from "./types";
 import { formatPriceDelta } from "@/lib/menu-options";
+import { OptionPicker, hasSizes } from "@/components/option-picker";
+import {
+  addLine,
+  cartKey,
+  changeQuantity,
+  loadCartDraft,
+  reconcileCart,
+  saveCartDraft,
+  type Cart,
+  type Size,
+} from "@/lib/cart-draft";
 
 function slug(id: string) {
   return `cat-${id}`;
@@ -39,7 +51,26 @@ function PriceBadge({ item, lang }: { item: MenuItemView; lang: Lang }) {
   );
 }
 
-function ItemCard({ item, lang, wide }: { item: MenuItemView; lang: Lang; wide: boolean }) {
+function isOrderable(item: MenuItemView) {
+  return !item.comingSoon && (item.price != null || item.priceLarge != null);
+}
+
+function ItemCard({
+  item,
+  lang,
+  wide,
+  quantity,
+  onAdd,
+  onRemove,
+}: {
+  item: MenuItemView;
+  lang: Lang;
+  wide: boolean;
+  quantity: number;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  const orderable = isOrderable(item);
   const primary = pick(lang, item.nameAr, item.nameFr);
   const secondary = pick(lang, item.nameFr, item.nameAr);
   const description = pick(lang, item.descriptionAr ?? "", item.descriptionFr ?? "");
@@ -49,8 +80,18 @@ function ItemCard({ item, lang, wide }: { item: MenuItemView; lang: Lang; wide: 
     <article
       className={`group relative flex flex-col overflow-hidden rounded-xl border border-[var(--hc-accent)]/45 bg-[var(--hc-surface)] shadow-[0_10px_30px_-18px_rgba(244,178,35,0.6)] ${
         wide ? "col-span-2 sm:col-span-1" : ""
-      } ${item.comingSoon ? "opacity-70" : ""}`}
+      } ${item.comingSoon ? "opacity-70" : ""} ${
+        quantity > 0 ? "ring-2 ring-[var(--hc-accent)]" : ""
+      } ${orderable ? "transition active:scale-[0.98]" : ""}`}
     >
+      {orderable && (
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label={`${pick(lang, "إضافة", "Ajouter")} ${primary}`}
+          className="absolute inset-0 z-[5] cursor-pointer rounded-xl focus-visible:outline-2 focus-visible:outline-[var(--hc-accent)]"
+        />
+      )}
       <div className={`relative w-full overflow-hidden ${wide ? "aspect-[16/9] sm:aspect-[4/3]" : "aspect-[4/3]"}`}>
         {item.photoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -75,6 +116,33 @@ function ItemCard({ item, lang, wide }: { item: MenuItemView; lang: Lang; wide: 
         <div className="absolute end-2 top-2">
           <PriceBadge item={item} lang={lang} />
         </div>
+        {orderable && (
+          <div className="absolute bottom-2 end-2 z-10 flex items-center gap-1.5 rounded-full bg-[var(--hc-bg)]/85 p-1 shadow-[0_4px_14px_-4px_rgba(0,0,0,0.8)] backdrop-blur">
+            {quantity > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  aria-label={pick(lang, "إزالة واحد", "Retirer un")}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--hc-line)] text-[var(--hc-ink)]"
+                >
+                  −
+                </button>
+                <span className="min-w-4 text-center text-sm font-semibold text-[var(--hc-ink)]">
+                  {quantity}
+                </span>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onAdd}
+              aria-label={`${pick(lang, "إضافة", "Ajouter")} ${primary}`}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--hc-red)] text-lg leading-none text-white"
+            >
+              +
+            </button>
+          </div>
+        )}
         {note && (
           <span className="absolute start-2 top-2 rounded-full bg-[var(--hc-red)] px-2 py-0.5 text-[11px] text-white">
             {note}
@@ -123,6 +191,51 @@ export function MenuView({ sections }: { sections: MenuSectionView[] }) {
   const categories = sections
     .flatMap((section) => section.categories)
     .filter((category) => category.items.length > 0);
+
+  const [cart, setCart] = useState<Cart>({});
+  const [cartLoaded, setCartLoaded] = useState(false);
+  const [picking, setPicking] = useState<MenuItemView | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage is only readable after mount
+    setCart(reconcileCart(loadCartDraft(), sections));
+    setCartLoaded(true);
+  }, [sections]);
+
+  useEffect(() => {
+    if (cartLoaded) saveCartDraft(cart);
+  }, [cart, cartLoaded]);
+
+  const lines = Object.values(cart);
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const total = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+
+  function quantityOf(itemId: string) {
+    return lines
+      .filter((line) => line.menuItemId === itemId)
+      .reduce((sum, line) => sum + line.quantity, 0);
+  }
+
+  function requestAdd(item: MenuItemView) {
+    if (hasSizes(item) || item.optionGroups.length > 0) {
+      setPicking(item);
+    } else {
+      setCart((prev) => addLine(prev, item, null, []));
+    }
+  }
+
+  function add(item: MenuItemView, size: Size | null, optionIds: string[]) {
+    setCart((prev) => addLine(prev, item, size, optionIds));
+  }
+
+  // Removes one from the most recently added variant of this dish.
+  function removeOne(itemId: string) {
+    const last = lines.filter((line) => line.menuItemId === itemId).at(-1);
+    if (!last) return;
+    setCart((prev) =>
+      changeQuantity(prev, cartKey(last.menuItemId, last.size, last.optionIds), -1)
+    );
+  }
 
   return (
     <main className="mx-auto min-h-screen max-w-3xl px-4 pb-28">
@@ -202,6 +315,9 @@ export function MenuView({ sections }: { sections: MenuSectionView[] }) {
                   // A lone card (or the odd one out) spans the full row on
                   // phones so the grid never leaves a hole, like the poster.
                   wide={category.items.length % 2 === 1 && index === 0}
+                  quantity={quantityOf(item.id)}
+                  onAdd={() => requestAdd(item)}
+                  onRemove={() => removeOne(item.id)}
                 />
               ))}
             </div>
@@ -231,27 +347,56 @@ export function MenuView({ sections }: { sections: MenuSectionView[] }) {
         </Link>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hc-line)] bg-[var(--hc-bg)]/90 px-4 py-3 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hc-line)] bg-[var(--hc-bg)]/90 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
         <Link
           href="/order"
-          className="btn-flame font-display mx-auto flex max-w-md items-center justify-center gap-3 rounded-md border px-6 py-3.5 text-base tracking-wide transition"
+          className="btn-flame font-display mx-auto flex max-w-md items-center justify-center gap-3 rounded-md border px-5 py-3.5 text-base tracking-wide transition"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-5 w-5 shrink-0"
-          >
-            <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
-            <path d="M3 6h18" />
-            <path d="M16 10a4 4 0 0 1-8 0" />
-          </svg>
-          {pick(lang, "اطلبوا الآن", "Commander maintenant")}
+          {itemCount > 0 ? (
+            <>
+              <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-[var(--hc-accent)] px-1.5 text-xs text-[var(--hc-bg)]">
+                {itemCount}
+              </span>
+              <span className="flex-1 text-start">
+                {pick(lang, "متابعة الطلب", "Passer commande")}
+              </span>
+              <span className="whitespace-nowrap">
+                {total} {pick(lang, "درهم", "DH")}
+              </span>
+            </>
+          ) : (
+            <>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5 shrink-0"
+              >
+                <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+                <path d="M3 6h18" />
+                <path d="M16 10a4 4 0 0 1-8 0" />
+              </svg>
+              {pick(lang, "اطلبوا الآن", "Commander maintenant")}
+            </>
+          )}
         </Link>
       </div>
+
+      {picking && (
+        <OptionPicker
+          key={picking.id}
+          item={picking}
+          lang={lang}
+          onCancel={() => setPicking(null)}
+          onConfirm={(size, optionIds) => {
+            add(picking, size, optionIds);
+            setPicking(null);
+          }}
+        />
+      )}
     </main>
   );
 }
