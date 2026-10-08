@@ -32,6 +32,7 @@ Set these in the Coolify application's **Environment Variables** tab (mark secre
 | `ADMIN_EMAIL` | `owner@yourdomain.com` | **Required.** The entrypoint creates/updates this admin login on every start |
 | `ADMIN_PASSWORD` | (strong password) | **Required.** Same as above (re-applied on every start) |
 | `NODE_ENV` | `production` | Already set in the image, but fine to set explicitly |
+| `COOKIE_SECURE` | (unset) | Optional. By default the admin cookie is `Secure` only when the request arrived over HTTPS. Set `true`/`false` to force it |
 
 Do **not** commit real secrets — `.env` is gitignored; use `.env.example` as the template.
 

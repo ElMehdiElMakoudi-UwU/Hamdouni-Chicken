@@ -1,14 +1,23 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 const COOKIE_NAME = "hamdouni_admin_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
-// A `Secure` cookie is dropped by browsers when set over plain HTTP, which
-// silently breaks login until the deployment has TLS. Set COOKIE_SECURE=false
-// while serving over HTTP only; flip it back (or unset it) once HTTPS is live.
-const COOKIE_SECURE =
-  process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false";
+// A `Secure` cookie is dropped by browsers when set over plain HTTP. The login
+// response still renders (Next reads the just-set cookie in that same request),
+// but every following navigation has no session and bounces back to the login
+// page. So only mark it Secure when the request actually came in over HTTPS
+// (as reported by the reverse proxy). COOKIE_SECURE=true/false forces it.
+async function shouldUseSecureCookie(): Promise<boolean> {
+  if (process.env.COOKIE_SECURE === "true") return true;
+  if (process.env.COOKIE_SECURE === "false") return false;
+  if (process.env.NODE_ENV !== "production") return false;
+
+  const headerStore = await headers();
+  const proto = headerStore.get("x-forwarded-proto")?.split(",")[0].trim();
+  return proto === "https";
+}
 
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET;
@@ -29,7 +38,7 @@ export async function createAdminSession(adminId: string) {
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, value, {
     httpOnly: true,
-    secure: COOKIE_SECURE,
+    secure: await shouldUseSecureCookie(),
     sameSite: "lax",
     path: "/",
     expires: new Date(expires),
